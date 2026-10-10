@@ -49,3 +49,11 @@ Judgment calls made where `SPEC.md` was ambiguous or silent, recorded as the bui
 - **Sizes.** Small, medium and large erasers have radii of 4, 9 and 18 pt. The stroke eraser's cursor shows a small × inside the circle to tell the two modes apart.
 - **Right button.** Any pointer whose right button is down at pointer-down (pen side button mapped to right click, or a mouse right-drag) erases with the current eraser mode and size, whatever tool is active. The context menu is suppressed over the document.
 - **Toggling mode.** Pressing E while the eraser is already the active tool toggles stroke/point (on a quick tap); the toolbar has a Stroke/Point toggle next to the eraser button.
+
+## Phase 5 — selection
+
+- **"Most of its points".** A stroke is selected when strictly more than half of its points fall inside the lasso loop (closed implicitly) or rectangle.
+- **Dragging a selection works with any drawing or selection tool.** Pressing inside the dashed selection box with the pen, highlighter, lasso or rectangle tool drags the selection (the cursor turns into a move cursor over the box). This is what makes the hold-to-use lasso useful: hold L (or the pen button mapped to L), loop some writing, release, and the pen comes back with the selection still there to drag. Pressing outside the box clears the selection and does what the tool normally does.
+- **What clears the selection.** A permanent tool switch (toolbar, tap of a shortcut), clicking empty space with a selection tool, starting to write outside the box, erasing, or Escape. A hold-to-use switch and its release do _not_ clear it.
+- **Paste position.** If the pointer has moved since the last copy/cut/paste, the pasted strokes' box is placed with its top-left corner at the pointer. Otherwise they go 12 pt right and down from the original, and repeated pastes without moving cascade (24 pt, 36 pt, …) so copies don't pile up invisibly on top of each other.
+- **Right button with a selection tool** still erases, consistent with the other tools.

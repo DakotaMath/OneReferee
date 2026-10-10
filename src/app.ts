@@ -31,6 +31,10 @@ import { drawStrokes, type DeviceTransform } from './render/ink';
 import { DrawGesture } from './tools/draw';
 import { SpaceGesture, drawCutGuide } from './tools/space';
 import { EraseGesture } from './tools/erase';
+import { MoveGesture, SelectGesture } from './tools/select';
+import { addStrokesCommand, strokeCommandFromDocs } from './model/commands';
+import { deleteStrokes, duplicateStrokes, selectionBounds } from './model/select';
+import type { BBox, Stroke } from './model/types';
 import { docYToSource } from './model/document';
 import { findBlankBands, snapToBlank, type Band } from './model/snap';
 import { PREVIEW_SCALE } from './render/pdfRenderer';
@@ -50,6 +54,14 @@ export class App implements ShortcutTarget {
   /** A temporary document shown instead of `doc` during a gesture (live previews). */
   previewDoc: Doc | null = null;
   readonly history = new History();
+  /** Ids of selected strokes. */
+  selection: ReadonlySet<string> = new Set();
+  /** Internal clipboard (never the system clipboard). */
+  private clipboard: Stroke[] = [];
+  /** Consecutive pastes without moving the pointer cascade by 12 pt each. */
+  private pasteOffset = 0;
+  private pointerMovedSinceClip = false;
+  private clipPointer = { sx: 0, sy: 0 };
   pdfBytes: Uint8Array | null = null;
   renderer: PdfRenderer | null = null;
   fileName: string | null = null;
@@ -283,6 +295,20 @@ export class App implements ShortcutTarget {
   /** Selection boxes, insert-space guide, etc. */
   protected drawOverlayExtras(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
     const doc = this.doc!;
+    const box = this.selectionBox();
+    if (box) {
+      const dpr = t.dpr;
+      const x0 = Math.round((t.ox + box.minX * t.k) * dpr) + 0.5;
+      const y0 = Math.round((t.oy + box.minY * t.k) * dpr) + 0.5;
+      const x1 = Math.round((t.ox + box.maxX * t.k) * dpr) + 0.5;
+      const y1 = Math.round((t.oy + box.maxY * t.k) * dpr) + 0.5;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.setLineDash([5 * dpr, 4 * dpr]);
+      ctx.strokeStyle = '#2b5797';
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.setLineDash([]);
+    }
     if (!this.gesture && this.effectiveTool() === 'space' && this.pointer.inside) {
       const p = this.toDoc(this.pointer.sx, this.pointer.sy);
       drawCutGuide(ctx, doc, this.snapCut(p.y, this.altDown), t);
@@ -320,6 +346,7 @@ export class App implements ShortcutTarget {
   /** Tool cursor drawn at the pen tip (pen dot / eraser circle). */
   protected drawCursor(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
     if (!this.pointer.inside) return;
+    if (this.gesture instanceof MoveGesture || (!this.gesture && this.hoverOverSelection())) return;
     const tool = this.gesture instanceof EraseGesture ? 'eraser' : this.effectiveTool();
     const dpr = t.dpr;
     const x = this.pointer.sx * dpr;
@@ -397,6 +424,11 @@ export class App implements ShortcutTarget {
   /** Called after any change to `doc` (commit, undo, redo). */
   protected afterChange(): void {
     this.dirty = this.history.isDirty;
+    if (this.selection.size && this.doc) {
+      const ids = new Set(this.doc.strokes.map((s) => s.id));
+      const kept = [...this.selection].filter((id) => ids.has(id));
+      if (kept.length !== this.selection.size) this.selection = new Set(kept);
+    }
     this.view = clampView(this.view, this.ext());
     this.invalidate(true, true, true);
     this.refreshUi();
@@ -467,11 +499,21 @@ export class App implements ShortcutTarget {
     let cursor = 'default';
     if (!this.doc) cursor = 'default';
     else if (this.gesture?.cursor) cursor = this.gesture.cursor;
+    else if (!this.gesture && this.hoverOverSelection()) cursor = 'move';
     else if (t === 'hand') cursor = 'grab';
     else if (t === 'pen' || t === 'highlighter' || t === 'eraser') cursor = 'none';
     else if (t === 'lasso' || t === 'rect') cursor = 'crosshair';
     else if (t === 'space') cursor = 'row-resize';
     this.stage.style.cursor = cursor;
+  }
+
+  /** Pointer hovering over the selection box with a tool that can drag it. */
+  private hoverOverSelection(): boolean {
+    if (!this.selection.size || !this.pointer.inside) return false;
+    const t = this.effectiveTool();
+    if (t !== 'pen' && t !== 'highlighter' && t !== 'lasso' && t !== 'rect') return false;
+    const p = this.toDoc(this.pointer.sx, this.pointer.sy);
+    return this.isOverSelection(p.x, p.y);
   }
 
   /** The tool in effect right now, including temporary overrides (Space held). */
@@ -564,6 +606,8 @@ export class App implements ShortcutTarget {
       if (e.pointerType === 'touch') return;
       const s = this.sampleFrom(e);
       this.pointer = { sx: s.sx, sy: s.sy, inside: true, type: e.pointerType };
+      if (Math.hypot(s.sx - this.clipPointer.sx, s.sy - this.clipPointer.sy) > 3)
+        this.pointerMovedSinceClip = true;
       if (this.gesture && e.pointerId === this.gesturePointer) {
         const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
         const samples = events.length ? events.map((c) => this.sampleFrom(c)) : [s];
@@ -602,6 +646,22 @@ export class App implements ShortcutTarget {
       return createPanGesture(this, s);
     }
     const tool = this.effectiveTool();
+    // Pressing inside the selection box drags the selection (with any drawing or selection tool).
+    if (
+      e.button === 0 &&
+      this.selection.size &&
+      (tool === 'pen' || tool === 'highlighter' || tool === 'lasso' || tool === 'rect') &&
+      this.isOverSelection(s.x, s.y)
+    ) {
+      return new MoveGesture(this, s);
+    }
+    if (tool === 'lasso' || tool === 'rect') {
+      if (e.button === 2 || s.buttons & 2) {
+        return new EraseGesture(this, this.settings.eraserMode, this.currentWidth('eraser'), s);
+      }
+      return new SelectGesture(this, tool, s);
+    }
+    if (this.selection.size && tool !== 'space') this.setSelection([]);
     // Right button (pen side button 1 mapped to right click): erase with the current eraser.
     if (e.button === 2 || s.buttons & 2 || tool === 'eraser') {
       return new EraseGesture(this, this.settings.eraserMode, this.currentWidth('eraser'), s);
@@ -615,6 +675,7 @@ export class App implements ShortcutTarget {
   }
 
   protected onHover(_s: Sample): void {
+    this.updateCursor();
     this.invalidate(false, false, true);
   }
 
@@ -754,7 +815,10 @@ export class App implements ShortcutTarget {
   }
 
   /** Switch tool. `temporary` is used by hold-to-use keys and keeps the selection. */
-  setTool(t: ToolId, _temporary = false): void {
+  setTool(t: ToolId, temporary = false): void {
+    // Switching tools clears the selection, except for hold-to-use switches (hold L to lasso,
+    // release to get the pen back with the selection still there to drag).
+    if (!temporary && t !== this.tool && this.selection.size) this.setSelection([]);
     this.tool = t;
     this.refreshUi();
     this.invalidate(false, false, true);
@@ -771,11 +835,90 @@ export class App implements ShortcutTarget {
     if (this.tool !== 'pen') this.setTool('pen');
     this.setColor(PEN_COLORS[i]);
   }
-  copy(): void {}
-  cut(): void {}
-  paste(): void {}
-  deleteSelection(): void {}
-  escape(): void {}
+  setSelection(ids: Iterable<string>): void {
+    this.selection = new Set(ids);
+    this.invalidate(false, false, true);
+    this.updateCursor();
+  }
+
+  /** Selection box in document coordinates (with a little padding), or null. */
+  selectionBox(): BBox | null {
+    const doc = this.displayDoc;
+    if (!doc || !this.selection.size) return null;
+    const b = selectionBounds(doc.strokes, this.selection);
+    if (!b) return null;
+    const pad = 4 / cssPerPt(this.view.zoom);
+    return { minX: b.minX - pad, minY: b.minY - pad, maxX: b.maxX + pad, maxY: b.maxY + pad };
+  }
+
+  isOverSelection(x: number, y: number): boolean {
+    const b = this.selectionBox();
+    return !!b && x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY;
+  }
+
+  private selectedStrokes(): Stroke[] {
+    return this.doc ? this.doc.strokes.filter((s) => this.selection.has(s.id)) : [];
+  }
+
+  private noteClip(): void {
+    this.pasteOffset = 0;
+    this.pointerMovedSinceClip = false;
+    this.clipPointer = { sx: this.pointer.sx, sy: this.pointer.sy };
+  }
+
+  copy(): void {
+    const strokes = this.selectedStrokes();
+    if (!strokes.length) return;
+    this.clipboard = strokes;
+    this.noteClip();
+    this.statusMessage = `Copied ${strokes.length} stroke${strokes.length > 1 ? 's' : ''}`;
+    this.refreshUi();
+  }
+
+  cut(): void {
+    if (!this.doc || this.isGestureActive) return;
+    const strokes = this.selectedStrokes();
+    if (!strokes.length) return;
+    this.clipboard = strokes;
+    this.noteClip();
+    const cmd = strokeCommandFromDocs('Cut', this.doc, deleteStrokes(this.doc, this.selection));
+    this.setSelection([]);
+    if (cmd) this.commit(cmd);
+  }
+
+  /** Paste at the pointer's last document position, or 12 pt from the original if it hasn't moved. */
+  paste(): void {
+    if (!this.doc || !this.clipboard.length || this.isGestureActive) return;
+    const src = this.clipboard;
+    const b = selectionBounds(src, new Set(src.map((s) => s.id)))!;
+    let dx: number;
+    let dy: number;
+    if (this.pointerMovedSinceClip && this.pointer.inside) {
+      const p = this.toDoc(this.pointer.sx, this.pointer.sy);
+      dx = p.x - b.minX;
+      dy = p.y - b.minY;
+      this.noteClip();
+      this.pasteOffset = 0;
+    } else {
+      this.pasteOffset += 12;
+      dx = this.pasteOffset;
+      dy = this.pasteOffset;
+    }
+    const copies = duplicateStrokes(src, dx, dy);
+    this.commit(addStrokesCommand('Paste', this.doc, copies));
+    this.setSelection(copies.map((s) => s.id));
+  }
+
+  deleteSelection(): void {
+    if (!this.doc || !this.selection.size || this.isGestureActive) return;
+    const cmd = strokeCommandFromDocs('Delete', this.doc, deleteStrokes(this.doc, this.selection));
+    this.setSelection([]);
+    if (cmd) this.commit(cmd);
+  }
+
+  escape(): void {
+    if (this.selection.size) this.setSelection([]);
+  }
 
   altChanged(down?: boolean): void {
     if (down !== undefined) this.altDown = down;
