@@ -46,6 +46,7 @@ Actions; see [Deploying](#deploying)).
 | Action                                              | Shortcut                                                 |
 | --------------------------------------------------- | -------------------------------------------------------- |
 | Pen                                                 | P                                                        |
+| Toggle pen ↔ insert space (any other tool → pen)    | S                                                        |
 | Highlighter                                         | H                                                        |
 | Eraser (press again to switch stroke/point)         | E (tap); hold E to erase temporarily                     |
 | Lasso select                                        | L (tap); hold L to lasso temporarily                     |
@@ -75,19 +76,19 @@ switches permanently. This lets keyboard-mapped pen buttons work either way.
 Set these in the Huion driver (HuionTablet app → your Kamvas 16 → Pen / Press Keys / Dial). Turn on
 **Windows Ink** in the pen settings as well.
 
-| Control           | Set to              | Effect in the app                       |
-| ----------------- | ------------------- | --------------------------------------- |
-| Pen side button 1 | Right click         | Hold while writing to erase             |
-| Pen side button 2 | Key L               | Hold for temporary lasso, tap to switch |
-| Pen side button 3 | Middle click        | Hold and drag to pan                    |
-| Display key 1     | P                   | Pen                                     |
-| Display key 2     | H                   | Highlighter                             |
-| Display key 3     | E                   | Eraser                                  |
-| Display key 4     | I                   | Insert space                            |
-| Display key 5     | Ctrl+Z              | Undo                                    |
-| Display key 6     | Ctrl+Y              | Redo                                    |
-| Dial 1            | Ctrl+= / Ctrl+-     | Zoom in and out                         |
-| Dial 2            | Page Up / Page Down | Scroll                                  |
+| Control                    | Set to              | Effect in the app                                           |
+| -------------------------- | ------------------- | ----------------------------------------------------------- |
+| Pen side button 1 (lowest) | Right click         | Hold while writing to erase                                 |
+| Pen side button 2 (middle) | Key Space           | Hold for the hand tool to drag the page, release to go back |
+| Pen side button 3 (top)    | Key S               | Tap to toggle pen ↔ insert space (from any other tool: pen) |
+| Display key 1              | P                   | Pen                                                         |
+| Display key 2              | H                   | Highlighter                                                 |
+| Display key 3              | E                   | Eraser                                                      |
+| Display key 4              | I                   | Insert space                                                |
+| Display key 5              | Ctrl+Z              | Undo                                                        |
+| Display key 6              | Ctrl+Y              | Redo                                                        |
+| Dial 1                     | Ctrl+= / Ctrl+-     | Zoom in and out                                             |
+| Dial 2                     | Page Up / Page Down | Scroll                                                      |
 
 ## Run locally
 

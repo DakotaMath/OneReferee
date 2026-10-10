@@ -46,11 +46,11 @@ export const TOOL_LABELS: Record<ToolId, string> = {
 };
 
 export const TOOL_SHORTCUTS: Record<ToolId, string> = {
-  pen: 'P',
+  pen: 'P, or S to toggle with insert space',
   highlighter: 'H',
   eraser: 'E',
   lasso: 'L',
   rect: 'M',
-  space: 'I',
+  space: 'I, or S to toggle with the pen',
   hand: 'V or hold Space',
 };
