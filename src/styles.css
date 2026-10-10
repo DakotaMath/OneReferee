@@ -386,6 +386,10 @@ kbd {
   flex: 1;
 }
 
+#statusbar .version {
+  opacity: 0.6;
+}
+
 #statusbar .saved-state {
   font-variant-numeric: tabular-nums;
 }
