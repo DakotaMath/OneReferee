@@ -10,6 +10,10 @@ export interface ShortcutTarget {
   setSpaceHeld(held: boolean): void;
   toggleEraserMode(): void;
   setPenColorIndex(i: number): void;
+  setHighlighterColorIndex(i: number): void;
+  useCustomColor(): void;
+  stepWidth(dir: 1 | -1): void;
+  fitWidth(): void;
   undo(): void;
   redo(): void;
   copy(): void;
@@ -111,7 +115,13 @@ export function installShortcuts(app: ShortcutTarget): void {
 
     let handled = true;
     if (key in TOOL_KEYS) app.setTool(TOOL_KEYS[key]);
+    else if (/^[1-4]$/.test(key) && app.tool === 'highlighter')
+      app.setHighlighterColorIndex(Number(key) - 1);
     else if (/^[1-6]$/.test(key)) app.setPenColorIndex(Number(key) - 1);
+    else if (key === '7') app.useCustomColor();
+    else if (key === '[') app.stepWidth(-1);
+    else if (key === ']') app.stepWidth(1);
+    else if (key === 'w') app.fitWidth();
     else if (key === 'f') app.toggleFullscreen();
     else if (key === 'Delete' || key === 'Backspace') app.deleteSelection();
     else if (key === 'Escape') app.escape();

@@ -158,6 +158,14 @@ export class App implements ShortcutTarget {
     this.installResizeHandling();
     this.installPointerHandling();
     this.installWheel();
+    // Ctrl+wheel over the toolbar or status bar must not zoom the whole browser page.
+    window.addEventListener(
+      'wheel',
+      (e) => {
+        if (e.ctrlKey) e.preventDefault();
+      },
+      { passive: false },
+    );
     this.installDragDrop();
     document.addEventListener('fullscreenchange', () => this.refreshUi());
     window.addEventListener('beforeunload', (e) => {
@@ -496,7 +504,46 @@ export class App implements ShortcutTarget {
   }
 
   /** Report pointer type and pressures of a finished stroke (for the Windows Ink tip). */
-  noteInput(_pointerType: string, _pressures: number[]): void {}
+  private inkSamples = { strokes: 0, mouse: 0, pressures: new Set<number>() };
+  private inkTipShown = false;
+
+  /**
+   * Windows Ink check: browsers only get pen pressure when Windows Ink is enabled in the
+   * Huion driver. If strokes keep arriving as mouse input, or pen pressure never varies,
+   * show a one-time dismissible tip.
+   */
+  noteInput(pointerType: string, pressures: number[]): void {
+    if (this.inkTipShown || this.settings.inkTipDismissed) return;
+    const s = this.inkSamples;
+    s.strokes++;
+    if (pointerType === 'mouse') s.mouse++;
+    if (pointerType === 'pen') for (const p of pressures) s.pressures.add(Math.round(p * 1000));
+    if (s.strokes < 3) return;
+    const allMouse = s.mouse === s.strokes;
+    const flatPen = s.mouse === 0 && s.pressures.size <= 1;
+    if (!allMouse && !flatPen) {
+      this.inkTipShown = true; // pressure works; stop checking
+      return;
+    }
+    this.inkTipShown = true;
+    toast(
+      allMouse
+        ? 'Writing with the Huion pen? It is arriving as a mouse, so there is no pressure. Turn on “Windows Ink” in the Huion driver (Pen settings), then reload this page.'
+        : 'Pen pressure is not changing. Turn on “Windows Ink” in the Huion driver (Pen settings), then reload this page.',
+      {
+        timeout: 0,
+        actions: [
+          {
+            label: 'Don’t show again',
+            run: () => {
+              this.settings.inkTipDismissed = true;
+              this.persistSettings();
+            },
+          },
+        ],
+      },
+    );
+  }
 
   refreshUi(): void {
     const doc = this.doc;
@@ -597,7 +644,9 @@ export class App implements ShortcutTarget {
     const sy = e.clientY - r.top;
     const d = this.toDoc(sx, sy);
     let pressure = e.pressure;
-    if (e.pointerType === 'mouse' || !(pressure > 0)) pressure = 0.5;
+    // Mouse (and devices without pressure) use a fixed 0.5. A pen keeps its real pressure,
+    // which is 0 while hovering and at lift-off.
+    if (e.pointerType !== 'pen' || !(pressure >= 0)) pressure = 0.5;
     return {
       sx,
       sy,
@@ -609,12 +658,18 @@ export class App implements ShortcutTarget {
       altKey: e.altKey,
       shiftKey: e.shiftKey,
       time: e.timeStamp,
+      contact: e.pointerType !== 'pen' || e.pressure > 0,
     };
   }
 
   private installPointerHandling(): void {
     const stage = this.stage;
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
+    // Stop Chrome's middle-click autoscroll so the middle button (pen side button 3) can pan.
+    stage.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+    stage.addEventListener('auxclick', (e) => e.preventDefault());
     stage.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') return; // no touch screen on the Kamvas; ignore touch input
       if (this.gesture) {
@@ -842,7 +897,8 @@ export class App implements ShortcutTarget {
     this.dirty = false;
     this.previewDoc = null;
     this.history.clear();
-    this.renderer = new PdfRenderer(pdf, doc.pages, () => this.invalidate(true, false, false));
+    // Overlay too: the insert-space guide re-snaps once a page's blank-row profile is ready.
+    this.renderer = new PdfRenderer(pdf, doc.pages, () => this.invalidate(true, false, true));
     this.view = { ...this.view, scrollX: 0, scrollY: 0 };
     const z = fitWidthZoom(this.view.width, getLayout(doc).columnWidth);
     this.view = clampView({ ...this.view, zoom: z }, this.ext());
@@ -1048,6 +1104,33 @@ export class App implements ShortcutTarget {
     this.spaceHeld = held;
     this.updateCursor();
     this.invalidate(false, false, true);
+  }
+
+  setHighlighterColorIndex(i: number): void {
+    if (this.tool !== 'highlighter') this.setTool('highlighter');
+    this.setColor(HIGHLIGHTER_COLORS[i]);
+  }
+
+  useCustomColor(): void {
+    if (this.tool !== 'pen') this.setTool('pen');
+    this.setColor(this.settings.penCustomColor);
+  }
+
+  /** Next thinner/thicker width for the pen or highlighter, or eraser size. */
+  stepWidth(dir: 1 | -1): void {
+    const st = this.settings;
+    const pick = (list: { id: string }[], cur: string) => {
+      const i = list.findIndex((w) => w.id === cur);
+      return list[Math.min(list.length - 1, Math.max(0, i + dir))].id;
+    };
+    if (this.tool === 'highlighter')
+      st.highlighterWidth = pick(HIGHLIGHTER_WIDTHS, st.highlighterWidth);
+    else if (this.tool === 'eraser') st.eraserSize = pick(ERASER_SIZES, st.eraserSize);
+    else {
+      if (this.tool !== 'pen') this.setTool('pen');
+      st.penWidth = pick(PEN_WIDTHS, st.penWidth);
+    }
+    this.persistSettings();
   }
 
   setPenColorIndex(i: number): void {

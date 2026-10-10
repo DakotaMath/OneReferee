@@ -32,6 +32,7 @@ export class DrawGesture implements Gesture {
   }
 
   private add(s: Sample): void {
+    if (!s.contact && this.points.length) return; // hovering samples (pressure 0) are not ink
     const pressure = this.tool === 'highlighter' ? 0.5 : Math.max(0.05, Math.min(1, s.pressure));
     this.pressures.push(s.pressure);
     const last = this.points[this.points.length - 1];
@@ -49,7 +50,8 @@ export class DrawGesture implements Gesture {
   }
 
   up(s: Sample): void {
-    this.add(s);
+    // A pen's pointerup has zero pressure at lift-off; its position is already recorded.
+    if (s.contact) this.add(s);
     const doc = this.host.doc;
     if (doc && this.points.length) {
       const stroke = makeStroke(this.tool, this.color, this.width, this.points);

@@ -128,7 +128,7 @@ export class Toolbar {
       button(ICONS.zoomOut, 'Zoom out (Ctrl+-)', () => a.zoomOut()),
       this.zoomLabel,
       button(ICONS.zoomIn, 'Zoom in (Ctrl+=)', () => a.zoomIn()),
-      button(ICONS.fitWidth, 'Fit width', () => a.fitWidth()),
+      button(ICONS.fitWidth, 'Fit width (W)', () => a.fitWidth()),
     );
 
     this.fullscreenBtn = button(ICONS.fullscreen, 'Full screen (F)', () => a.toggleFullscreen());
@@ -186,7 +186,7 @@ export class Toolbar {
         const b = el('button', {
           className: 'swatch' + (c.toLowerCase() === current.toLowerCase() ? ' active' : ''),
           type: 'button',
-          title: isPen ? `${names[i]} (${i + 1})` : names[i],
+          title: `${names[i]} (${i + 1})`,
         });
         b.style.background = c;
         b.addEventListener('mousedown', (e) => e.preventDefault());
@@ -201,7 +201,7 @@ export class Toolbar {
             current.toLowerCase() === st.penCustomColor.toLowerCase()
               ? ' active'
               : ''),
-          title: 'Custom color (click to use, click again to pick)',
+          title: 'Custom color (7) — click to use, click again to pick a color',
         });
         const inner = el('span', { className: 'inner' });
         inner.style.background = st.penCustomColor;
@@ -228,7 +228,7 @@ export class Toolbar {
         const px = isPen ? 2 + w.width * 2 : 4 + w.width * 0.8;
         const b = button(
           `<span class="dot" style="width:${px}px;height:${px}px;${isPen ? '' : `background:${current};border-radius:3px;outline:1px solid #b9bdc6`}"></span>`,
-          `${w.label} (${w.width} pt)`,
+          `${w.label} (${w.width} pt) — [ and ] change width`,
           () => a.setWidth(w.id),
           'tb-btn small width-btn' + (w.id === currentW ? ' active' : ''),
         );
@@ -239,7 +239,7 @@ export class Toolbar {
         const px = 6 + w.width * 0.8;
         const b = button(
           `<span class="dot" style="width:${px}px;height:${px}px;background:transparent;border:1.5px solid currentColor"></span>`,
-          `${w.label} eraser`,
+          `${w.label} eraser — [ and ] change size`,
           () => a.setWidth(w.id),
           'tb-btn small width-btn' + (w.id === st.eraserSize ? ' active' : ''),
         );

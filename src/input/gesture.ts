@@ -12,6 +12,8 @@ export interface Sample {
   altKey: boolean;
   shiftKey: boolean;
   time: number;
+  /** False for a pen hovering above the screen (pressure 0), e.g. with a side button held. */
+  contact: boolean;
 }
 
 /** One pointer-down-to-up interaction. */

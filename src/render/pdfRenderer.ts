@@ -41,7 +41,7 @@ const TILE_H = 1024;
 const MAX_TILE_W = 2048;
 /** Pixel budget for cached sharp tiles (~4 bytes each). */
 const TILE_PIXEL_BUDGET = 40_000_000;
-const MAX_PREVIEWS = 30;
+const MAX_PREVIEWS = 20;
 
 export interface Tile {
   canvas: HTMLCanvasElement;

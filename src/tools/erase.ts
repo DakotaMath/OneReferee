@@ -32,7 +32,7 @@ export class EraseGesture implements Gesture {
     this.working = this.base;
     this.lastX = start.x;
     this.lastY = start.y;
-    this.dab(start.x, start.y);
+    if (start.contact) this.dab(start.x, start.y);
     this.publish();
   }
 
@@ -41,7 +41,13 @@ export class EraseGesture implements Gesture {
     if (strokes !== this.working.strokes) this.working = { ...this.working, strokes };
   }
 
-  private sweepTo(x: number, y: number): void {
+  private sweepTo(x: number, y: number, contact = true): void {
+    if (!contact) {
+      // Pen hovering with the side button held: follow it, but erase only on contact.
+      this.lastX = x;
+      this.lastY = y;
+      return;
+    }
     const dist = Math.hypot(x - this.lastX, y - this.lastY);
     const step = Math.max(0.25, this.radius / 2);
     const n = Math.ceil(dist / step);
@@ -59,12 +65,12 @@ export class EraseGesture implements Gesture {
   }
 
   move(samples: Sample[]): void {
-    for (const s of samples) this.sweepTo(s.x, s.y);
+    for (const s of samples) this.sweepTo(s.x, s.y, s.contact);
     this.publish();
   }
 
   up(s: Sample): void {
-    this.sweepTo(s.x, s.y);
+    this.sweepTo(s.x, s.y, s.contact);
     this.host.previewDoc = null;
     const label = this.mode === 'stroke' ? 'Erase strokes' : 'Erase';
     const cmd = strokeCommandFromDocs(label, this.base, this.working);
