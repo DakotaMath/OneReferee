@@ -25,11 +25,26 @@ import { pickFileToOpen, isProjectName, type FsFileHandle } from './io/files';
 import { makeSamplePdf } from './io/samplePdf';
 import type { ToolId } from './tools/toolTypes';
 import type { ShortcutTarget } from './ui/shortcuts';
+import { History } from './model/history';
+import type { Command } from './model/commands';
+import { drawStrokes, type DeviceTransform } from './render/ink';
+import { DrawGesture } from './tools/draw';
+import { origin } from './render/viewport';
+import {
+  ERASER_SIZES,
+  HIGHLIGHTER_COLORS,
+  HIGHLIGHTER_WIDTHS,
+  PEN_COLORS,
+  PEN_WIDTHS,
+} from './tools/toolTypes';
 
 const ZOOM_SETTLE_MS = 180;
 
 export class App implements ShortcutTarget {
   doc: Doc | null = null;
+  /** A temporary document shown instead of `doc` during a gesture (live previews). */
+  previewDoc: Doc | null = null;
+  readonly history = new History();
   pdfBytes: Uint8Array | null = null;
   renderer: PdfRenderer | null = null;
   fileName: string | null = null;
@@ -193,7 +208,7 @@ export class App implements ShortcutTarget {
       this.needPdf = false;
       if (doc) {
         const sharp = performance.now() - this.lastZoomChange > ZOOM_SETTLE_MS;
-        this.scene.drawPdf(doc, this.view, this.renderer, sharp);
+        this.scene.drawPdf(this.displayDoc!, this.view, this.renderer, sharp);
       } else {
         this.scene.clearPdf();
       }
@@ -209,13 +224,40 @@ export class App implements ShortcutTarget {
     this.renderer?.pump();
   }
 
-  /** Overridden in later phases: draw committed ink. */
+  /** The document as currently displayed (a live preview while a gesture is in progress). */
+  get displayDoc(): Doc | null {
+    return this.previewDoc ?? this.doc;
+  }
+
+  deviceTransform(): DeviceTransform {
+    const o = origin(this.view, this.ext());
+    return { ox: o.x, oy: o.y, k: cssPerPt(this.view.zoom), dpr: this.scene.dpr };
+  }
+
+  /** The visible document rectangle. */
+  visibleDocRect() {
+    const a = this.toDoc(0, 0);
+    const b = this.toDoc(this.view.width, this.view.height);
+    return { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y };
+  }
+
+  /** Strokes hidden from the committed ink layers (drawn on the overlay instead, e.g. while dragging). */
+  hiddenStrokeIds: ReadonlySet<string> | undefined;
+
   protected drawInk(): void {
     const s = this.scene;
-    for (const ctx of [s.hlCtx, s.inkCtx]) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    const doc = this.displayDoc;
+    if (!doc) {
+      for (const ctx of [s.hlCtx, s.inkCtx]) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      }
+      return;
     }
+    const t = this.deviceTransform();
+    const vis = this.visibleDocRect();
+    drawStrokes(s.hlCtx, doc.strokes, 'highlighter', t, vis, this.hiddenStrokeIds);
+    drawStrokes(s.inkCtx, doc.strokes, 'pen', t, vis, this.hiddenStrokeIds);
   }
 
   /** Draw the overlay layer: live stroke, selection, cursor. */
@@ -223,7 +265,111 @@ export class App implements ShortcutTarget {
     const ctx = this.scene.overlayCtx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    if (!this.doc) return;
+    const t = this.deviceTransform();
+    const g = this.gesture;
+    const multiply = g instanceof DrawGesture && g.tool === 'highlighter';
+    this.scene.overlayCanvas.classList.toggle('multiply', multiply);
+    this.drawOverlayExtras(ctx, t);
+    g?.drawOverlay?.(ctx, t);
+    this.drawCursor(ctx, t);
   }
+
+  /** Selection boxes, insert-space guide, etc. (later phases). */
+  protected drawOverlayExtras(_ctx: CanvasRenderingContext2D, _t: DeviceTransform): void {}
+
+  /** Tool cursor drawn at the pen tip (pen dot / eraser circle). */
+  protected drawCursor(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
+    if (!this.pointer.inside) return;
+    const tool = this.effectiveTool();
+    const dpr = t.dpr;
+    const x = this.pointer.sx * dpr;
+    const y = this.pointer.sy * dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (tool === 'pen' || tool === 'highlighter') {
+      const isPen = tool === 'pen';
+      const w = this.currentWidth(tool);
+      const r = Math.max(1.5 * dpr, (w * t.k * dpr) / 2);
+      ctx.beginPath();
+      if (isPen) ctx.arc(x, y, r, 0, Math.PI * 2);
+      else ctx.rect(x - r * 0.35, y - r, r * 0.7, r * 2);
+      ctx.fillStyle = isPen ? this.settings.penColor : this.settings.highlighterColor;
+      ctx.globalAlpha = isPen ? 1 : 0.8;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = dpr;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.stroke();
+    }
+  }
+
+  /** Width in points for the pen/highlighter, or eraser radius. */
+  currentWidth(tool: ToolId): number {
+    const st = this.settings;
+    if (tool === 'pen')
+      return (PEN_WIDTHS.find((w) => w.id === st.penWidth) ?? PEN_WIDTHS[1]).width;
+    if (tool === 'highlighter')
+      return (HIGHLIGHTER_WIDTHS.find((w) => w.id === st.highlighterWidth) ?? HIGHLIGHTER_WIDTHS[0])
+        .width;
+    return (ERASER_SIZES.find((w) => w.id === st.eraserSize) ?? ERASER_SIZES[1]).width;
+  }
+
+  invalidateOverlay(immediate = false): void {
+    if (immediate) {
+      // Draw the live stroke right away (inside the pointer event) for minimum latency.
+      this.needOverlay = false;
+      this.drawOverlay();
+    } else {
+      this.invalidate(false, false, true);
+    }
+  }
+
+  // ---------------------------------------------------------------- editing
+
+  /** Apply a command, record it for undo, and mark the document changed. */
+  commit(cmd: Command): void {
+    if (!this.doc) return;
+    this.doc = cmd.apply(this.doc);
+    this.previewDoc = null;
+    this.history.push(cmd);
+    this.afterChange();
+  }
+
+  /** Called after any change to `doc` (commit, undo, redo). */
+  protected afterChange(): void {
+    this.dirty = this.history.isDirty;
+    this.invalidate(true, true, true);
+    this.refreshUi();
+  }
+
+  canUndo(): boolean {
+    return this.history.canUndo && !this.gesture;
+  }
+
+  canRedo(): boolean {
+    return this.history.canRedo && !this.gesture;
+  }
+
+  undo(): void {
+    if (!this.doc || this.gesture) return;
+    const d = this.history.undo(this.doc);
+    if (d) {
+      this.doc = d;
+      this.afterChange();
+    }
+  }
+
+  redo(): void {
+    if (!this.doc || this.gesture) return;
+    const d = this.history.redo(this.doc);
+    if (d) {
+      this.doc = d;
+      this.afterChange();
+    }
+  }
+
+  /** Report pointer type and pressures of a finished stroke (for the Windows Ink tip). */
+  noteInput(_pointerType: string, _pressures: number[]): void {}
 
   refreshUi(): void {
     const doc = this.doc;
@@ -260,7 +406,11 @@ export class App implements ShortcutTarget {
     const t = this.effectiveTool();
     let cursor = 'default';
     if (!this.doc) cursor = 'default';
-    else if (t === 'hand') cursor = this.gesture ? 'grabbing' : 'grab';
+    else if (this.gesture?.cursor) cursor = this.gesture.cursor;
+    else if (t === 'hand') cursor = 'grab';
+    else if (t === 'pen' || t === 'highlighter' || t === 'eraser') cursor = 'none';
+    else if (t === 'lasso' || t === 'rect') cursor = 'crosshair';
+    else if (t === 'space') cursor = 'row-resize';
     this.stage.style.cursor = cursor;
   }
 
@@ -391,6 +541,11 @@ export class App implements ShortcutTarget {
     if (e.button === 1 || e.buttons & 4 || this.effectiveTool() === 'hand') {
       return createPanGesture(this, s);
     }
+    const tool = this.effectiveTool();
+    if (tool === 'pen' || tool === 'highlighter') {
+      const color = tool === 'pen' ? this.settings.penColor : this.settings.highlighterColor;
+      return new DrawGesture(this, tool, color, this.currentWidth(tool), s, e.pointerType);
+    }
     return null;
   }
 
@@ -509,6 +664,8 @@ export class App implements ShortcutTarget {
     this.doc = doc;
     this.fileName = name;
     this.dirty = false;
+    this.previewDoc = null;
+    this.history.clear();
     this.renderer = new PdfRenderer(pdf, doc.pages, () => this.invalidate(true, false, false));
     this.view = { ...this.view, scrollX: 0, scrollY: 0 };
     const z = fitWidthZoom(this.view.width, getLayout(doc).columnWidth);
@@ -525,16 +682,7 @@ export class App implements ShortcutTarget {
   async save(_saveAs: boolean): Promise<void> {}
   async exportPdf(): Promise<void> {}
 
-  // ---------------------------------------------------------------- editing (later phases)
-
-  canUndo(): boolean {
-    return false;
-  }
-  canRedo(): boolean {
-    return false;
-  }
-  undo(): void {}
-  redo(): void {}
+  // ---------------------------------------------------------------- tools
 
   get hasDoc(): boolean {
     return this.doc !== null;
@@ -554,7 +702,10 @@ export class App implements ShortcutTarget {
     this.invalidate(false, false, true);
   }
 
-  setPenColorIndex(_i: number): void {}
+  setPenColorIndex(i: number): void {
+    if (this.tool !== 'pen') this.setTool('pen');
+    this.setColor(PEN_COLORS[i]);
+  }
   copy(): void {}
   cut(): void {}
   paste(): void {}
@@ -582,9 +733,28 @@ export class App implements ShortcutTarget {
     this.persistSettings();
   }
 
-  setColor(_c: string): void {}
-  setCustomColor(_c: string): void {}
-  setWidth(_id: string): void {}
+  setColor(c: string): void {
+    if (this.tool === 'highlighter') {
+      if (HIGHLIGHTER_COLORS.includes(c)) this.settings.highlighterColor = c;
+    } else {
+      this.settings.penColor = c;
+      if (this.tool !== 'pen') this.setTool('pen');
+    }
+    this.persistSettings();
+  }
+
+  setCustomColor(c: string): void {
+    this.settings.penCustomColor = c;
+    this.settings.penColor = c;
+    this.persistSettings();
+  }
+
+  setWidth(id: string): void {
+    if (this.tool === 'pen') this.settings.penWidth = id;
+    else if (this.tool === 'highlighter') this.settings.highlighterWidth = id;
+    else if (this.tool === 'eraser') this.settings.eraserSize = id;
+    this.persistSettings();
+  }
 
   persistSettings(): void {
     saveSettings(this.settings);

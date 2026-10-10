@@ -1,3 +1,5 @@
+import type { DeviceTransform } from '../render/ink';
+
 /** A pointer sample in both screen (CSS px, relative to the stage) and document coordinates. */
 export interface Sample {
   sx: number;
@@ -21,4 +23,8 @@ export interface Gesture {
   cancel(): void;
   /** True if this gesture should keep the CSS cursor hidden (custom overlay cursor). */
   readonly drawsCursor?: boolean;
+  /** CSS cursor to show while this gesture is active. */
+  readonly cursor?: string;
+  /** Draw live feedback on the overlay canvas. */
+  drawOverlay?(ctx: CanvasRenderingContext2D, t: DeviceTransform): void;
 }

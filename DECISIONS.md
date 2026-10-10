@@ -21,3 +21,13 @@ Judgment calls made where `SPEC.md` was ambiguous or silent, recorded as the bui
 - **Pages of different widths** are centred in a column as wide as the widest page.
 - **Between-page separators** are drawn in the gray page-area color; inserted gaps inside a page are white and share the page's width, edge and shadow.
 - **Performance check.** In headless Chromium (software rendering) the PDF layer itself draws in under 1 ms per frame; the remaining cost is compositing in software. Smoothness on real hardware is part of TESTING.md.
+
+## Phase 2 — ink
+
+- **Stroke storage.** A stroke keeps its points relative to an origin `(ox, oy)` (the first point) plus an absolute bounding box. Moving a stroke (insert space, dragging a selection) only changes the origin, so the cached perfect-freehand outline is reused; this keeps live insert-space previews fast with thousands of strokes. Absolute point = origin + relative point.
+- **Rounding at creation.** Coordinates are rounded to 0.01 pt (pressure to 0.001) when a stroke is created or moved, not only when saving. Rounding is idempotent, so a saved file reloads to an identical document.
+- **Pressure curve.** perfect-freehand with thinning 0.5: width at pressure p is `width × (0.5 + p) / 1.5`, so the nominal width (1/2/4 pt) is reached at full pressure. Pen pressure is clamped to at least 0.05. Mouse input uses a fixed 0.5 (two-thirds of full width). The highlighter ignores pressure.
+- **Highlighter blending.** Highlighter strokes live on their own canvas below the pen canvas, which is blended onto the PDF with `mix-blend-mode: multiply`. Within that canvas strokes combine with `darken`, so overlapping passes of the same color don't build up darker blotches. Highlighter colors are light tints (yellow, green, pink, blue).
+- **Live stroke.** The in-progress stroke is drawn on the `desynchronized` overlay canvas directly inside the pointer event (not on the next animation frame), using all coalesced points.
+- **Commands.** Stroke edits are stored as a minimal index-based diff (removed and added strokes with positions), so undo/redo restores the exact array including z-order. Undo history keeps 500 steps. The "unsaved" state is tracked against a save point, so undoing back to the saved state clears the dot.
+- **Number keys** 1–6 pick a pen color and switch to the pen if another tool is active.

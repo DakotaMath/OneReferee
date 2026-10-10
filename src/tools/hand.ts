@@ -10,6 +10,7 @@ export function createPanGesture(app: Pannable, start: Sample): Gesture {
   let lastX = start.sx;
   let lastY = start.sy;
   return {
+    cursor: 'grabbing',
     move(samples) {
       const s = samples[samples.length - 1];
       app.scrollBy(lastX - s.sx, lastY - s.sy);
