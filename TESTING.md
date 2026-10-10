@@ -36,8 +36,9 @@ PDF (ideally a long one, 40–60 pages). The app's **Try a sample document** but
       under the cursor stays under the cursor).
 - [ ] 1.7 Zoom to **400%** and wait a moment: text and equations are crisp, not pixelated.
 - [ ] 1.8 **Ctrl+0** returns to 100%. The **Fit width** button (or **W**) fits the page to the window.
-- [ ] 1.9 Pan: hold **Space** and drag with the pen; press **V** (hand tool) and drag; hold **pen side
-      button 3** (middle click) and drag. Each moves the document, and no autoscroll icon appears.
+- [ ] 1.9 Pan: hold **pen side button 2** (Space) and drag with the pen: the hand cursor appears and
+      the page moves; release the button and you're back on your previous tool. Also try pressing
+      **V** (hand tool) and dragging, and dragging with the middle mouse button (no autoscroll icon).
 - [ ] 1.10 Drag the scrollbar thumb on the right edge; click above/below it to page up/down.
 - [ ] 1.11 Press **F** (or the full-screen button at the far right): the app fills the Kamvas. Press
       **F** again (or Esc) to leave full screen.
@@ -52,6 +53,7 @@ PDF (ideally a long one, 40–60 pages). The app's **Try a sample document** but
       noticeable lag, and stays smooth on fast curves.
 - [ ] 2.3 Press lightly then harder in one stroke: the line gets thicker with pressure.
       (If a tip about **Windows Ink** appears, pressure isn't reaching the browser; go back to 0.1.)
+- [ ] 2.3a On a fresh start (no colors picked yet), the pen is **red** by default.
 - [ ] 2.4 Click each pen color swatch, and try keys **1–6**: black, dark blue, red, green, orange,
       purple.
 - [ ] 2.5 Click the rainbow (custom) swatch, then click it again to open the color picker; choose a
@@ -128,11 +130,13 @@ PDF (ideally a long one, 40–60 pages). The app's **Try a sample document** but
 - [ ] 6.7 Select and press **Delete** (or Backspace): the selection is removed. Undo restores it.
 - [ ] 6.8 Click empty space with the lasso or rectangle tool, or press **Escape**: the selection
       clears. Switching tool from the toolbar also clears it.
-- [ ] 6.9 Hold-to-use lasso with the pen button: while on the pen, hold **pen side button 2** (L) and
-      loop some writing with the pen, release the button. The tool returns to the pen and the
-      selection stays: drag it with the pen (the cursor shows a move arrow over the box).
-- [ ] 6.10 Tap pen side button 2 quickly: the lasso stays selected permanently.
-- [ ] 6.11 Copy/paste works only inside the app (pasting into another program does nothing), as
+- [ ] 6.9 Hold-to-use lasso: while on the pen, hold **L** on the keyboard and loop some writing with
+      the pen, release L. The tool returns to the pen and the selection stays: drag it with the pen
+      (the cursor shows a move arrow over the box).
+- [ ] 6.10 Tap L quickly: the lasso stays selected permanently.
+- [ ] 6.11 **Pen side button 3** (S): on the pen, tap it → insert space; tap again → pen. From the
+      highlighter, eraser or any other tool, tap it → pen.
+- [ ] 6.12 Copy/paste works only inside the app (pasting into another program does nothing), as
       intended.
 
 ## 7. Saving, autosave and export

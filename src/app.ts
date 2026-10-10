@@ -1133,6 +1133,11 @@ export class App implements ShortcutTarget {
     this.persistSettings();
   }
 
+  /** S (a pen side button): pen -> insert space -> pen; any other tool -> pen. */
+  togglePenSpace(): void {
+    this.setTool(this.tool === 'pen' ? 'space' : 'pen');
+  }
+
   setPenColorIndex(i: number): void {
     if (this.tool !== 'pen') this.setTool('pen');
     this.setColor(PEN_COLORS[i]);

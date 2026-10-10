@@ -22,7 +22,7 @@ export interface Settings {
 const KEY = 'pdf-spacer-notes:settings';
 
 export const DEFAULT_SETTINGS: Settings = {
-  penColor: PEN_COLORS[0],
+  penColor: PEN_COLORS[2], // red
   penWidth: PEN_WIDTHS[1].id,
   penCustomColor: '#00838f',
   highlighterColor: HIGHLIGHTER_COLORS[0],
