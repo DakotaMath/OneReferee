@@ -40,3 +40,12 @@ Judgment calls made where `SPEC.md` was ambiguous or silent, recorded as the bui
 - **Merging.** After removal, zero-height inserted gaps are dropped and adjacent slices of the same page whose source ranges touch are merged back into one slice, so opening and fully closing a gap restores the original segment list exactly.
 - **Snapping.** The blank-row profile comes from each page's low-res preview render (1.5 px/pt); a row is blank if every pixel has all channels ≥ 225. Blank bands thinner than 2 pt are ignored (so cuts don't land between the parts of a fraction). Within 12 pt, the cut moves into the nearest band, at least 1.5 pt away from the ink edges. If a page's profile isn't ready yet, the cut is not snapped. Holding Alt disables snapping; Alt's default browser behavior (focusing the menu bar) is suppressed.
 - **Preview.** While dragging, the whole document (PDF slices and ink) is shown live from a preview document; the opened area is lightly tinted and the cut line drawn with arrow heads. Nothing is committed until release, which records one undo step.
+
+## Phase 4 — erasers
+
+- **Eraser reach.** A stroke counts as touched when it comes within the eraser radius plus half the stroke's width, i.e. when the eraser circle touches the visible ink, not just its centre line.
+- **Exact splitting.** The point eraser intersects each stroke segment with the eraser circle and cuts at the exact intersection points (pressure interpolated), so even a fast two-point line splits cleanly. Leftover pieces shorter than 0.05 pt or with fewer than two points are dropped. Pieces keep the original's color, width and stacking position and get new ids.
+- **Sweeping.** Between pointer samples the eraser is applied every half radius along the path, so fast swipes don't skip strokes.
+- **Sizes.** Small, medium and large erasers have radii of 4, 9 and 18 pt. The stroke eraser's cursor shows a small × inside the circle to tell the two modes apart.
+- **Right button.** Any pointer whose right button is down at pointer-down (pen side button mapped to right click, or a mouse right-drag) erases with the current eraser mode and size, whatever tool is active. The context menu is suppressed over the document.
+- **Toggling mode.** Pressing E while the eraser is already the active tool toggles stroke/point (on a quick tap); the toolbar has a Stroke/Point toggle next to the eraser button.

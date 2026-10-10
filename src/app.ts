@@ -30,6 +30,7 @@ import type { Command } from './model/commands';
 import { drawStrokes, type DeviceTransform } from './render/ink';
 import { DrawGesture } from './tools/draw';
 import { SpaceGesture, drawCutGuide } from './tools/space';
+import { EraseGesture } from './tools/erase';
 import { docYToSource } from './model/document';
 import { findBlankBands, snapToBlank, type Band } from './model/snap';
 import { PREVIEW_SCALE } from './render/pdfRenderer';
@@ -319,7 +320,7 @@ export class App implements ShortcutTarget {
   /** Tool cursor drawn at the pen tip (pen dot / eraser circle). */
   protected drawCursor(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
     if (!this.pointer.inside) return;
-    const tool = this.effectiveTool();
+    const tool = this.gesture instanceof EraseGesture ? 'eraser' : this.effectiveTool();
     const dpr = t.dpr;
     const x = this.pointer.sx * dpr;
     const y = this.pointer.sy * dpr;
@@ -338,6 +339,26 @@ export class App implements ShortcutTarget {
       ctx.lineWidth = dpr;
       ctx.strokeStyle = 'rgba(255,255,255,0.9)';
       ctx.stroke();
+    } else if (tool === 'eraser') {
+      const r = Math.max(2 * dpr, this.currentWidth('eraser') * t.k * dpr);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fill();
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.strokeStyle = 'rgba(30,30,30,0.85)';
+      ctx.stroke();
+      if (this.settings.eraserMode === 'stroke') {
+        // A small cross marks the stroke eraser (removes whole strokes).
+        const c = r * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(x - c, y - c);
+        ctx.lineTo(x + c, y + c);
+        ctx.moveTo(x + c, y - c);
+        ctx.lineTo(x - c, y + c);
+        ctx.lineWidth = dpr;
+        ctx.stroke();
+      }
     }
   }
 
@@ -442,7 +463,7 @@ export class App implements ShortcutTarget {
   }
 
   protected updateCursor(): void {
-    const t = this.effectiveTool();
+    const t = this.gesture instanceof EraseGesture ? 'eraser' : this.effectiveTool();
     let cursor = 'default';
     if (!this.doc) cursor = 'default';
     else if (this.gesture?.cursor) cursor = this.gesture.cursor;
@@ -581,6 +602,10 @@ export class App implements ShortcutTarget {
       return createPanGesture(this, s);
     }
     const tool = this.effectiveTool();
+    // Right button (pen side button 1 mapped to right click): erase with the current eraser.
+    if (e.button === 2 || s.buttons & 2 || tool === 'eraser') {
+      return new EraseGesture(this, this.settings.eraserMode, this.currentWidth('eraser'), s);
+    }
     if (tool === 'pen' || tool === 'highlighter') {
       const color = tool === 'pen' ? this.settings.penColor : this.settings.highlighterColor;
       return new DrawGesture(this, tool, color, this.currentWidth(tool), s, e.pointerType);
