@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2b5797" />
+    <meta name="description" content="Write on PDFs with a pen and open up space between lines." />
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>PDF Spacer Notes</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar" role="toolbar" aria-label="Tools"></header>
+      <main id="viewer">
+        <div id="stage" tabindex="-1">
+          <canvas id="pdf-canvas"></canvas>
+          <canvas id="hl-canvas"></canvas>
+          <canvas id="ink-canvas"></canvas>
+          <canvas id="overlay-canvas"></canvas>
+        </div>
+        <div id="vscroll" class="scrollbar vertical"><div class="thumb"></div></div>
+        <div id="hscroll" class="scrollbar horizontal"><div class="thumb"></div></div>
+        <div id="empty-state">
+          <div class="empty-card">
+            <h1>PDF Spacer Notes</h1>
+            <p>Open a PDF to start writing. Drag it onto this window, or:</p>
+            <div class="empty-actions">
+              <button id="empty-open" class="primary">Open PDF… <kbd>Ctrl+O</kbd></button>
+              <button id="empty-sample">Try a sample document</button>
+            </div>
+          </div>
+        </div>
+        <div id="drop-hint">Drop a PDF or .pdfnotes file to open it</div>
+      </main>
+      <footer id="statusbar"></footer>
+    </div>
+    <div id="toasts" aria-live="polite"></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
