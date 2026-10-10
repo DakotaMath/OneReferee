@@ -21,7 +21,21 @@ import { StatusBar } from './ui/statusbar';
 import { Scrollbars } from './ui/scrollbars';
 import { loadSettings, saveSettings, type Settings } from './ui/settings';
 import { toast } from './ui/toast';
-import { pickFileToOpen, isProjectName, type FsFileHandle } from './io/files';
+import {
+  PDF_TYPE,
+  PROJECT_TYPE,
+  baseName,
+  downloadBlob,
+  isProjectName,
+  pickFileToOpen,
+  pickSaveLocation,
+  writeToHandle,
+  type FsFileHandle,
+} from './io/files';
+import { parseProject, serializeProject } from './model/serialize';
+import { exportAnnotatedPdf } from './io/exportPdf';
+import { clearAutosave, readAutosave, writeAutosave } from './io/autosave';
+import { banner } from './ui/toast';
 import { makeSamplePdf } from './io/samplePdf';
 import type { ToolId } from './tools/toolTypes';
 import type { ShortcutTarget } from './ui/shortcuts';
@@ -64,8 +78,16 @@ export class App implements ShortcutTarget {
   private clipPointer = { sx: 0, sy: 0 };
   pdfBytes: Uint8Array | null = null;
   renderer: PdfRenderer | null = null;
+  /** Name shown in the title: the project file's name once saved, else the PDF's. */
   fileName: string | null = null;
+  /** Name of the original PDF. */
+  pdfName = 'document.pdf';
+  /** Where Ctrl+S writes the project (null until saved or opened from a .pdfnotes file). */
   fileHandle: FsFileHandle | null = null;
+  private autosaveTimer = 0;
+  private autosaveFailing = false;
+  private saving = false;
+  private closeRestoreBanner: (() => void) | null = null;
   dirty = false;
   statusMessage = '';
 
@@ -138,6 +160,17 @@ export class App implements ShortcutTarget {
     this.installWheel();
     this.installDragDrop();
     document.addEventListener('fullscreenchange', () => this.refreshUi());
+    window.addEventListener('beforeunload', (e) => {
+      if (this.dirty) {
+        void this.autosaveNow();
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && this.autosaveTimer) void this.autosaveNow();
+    });
+    void this.offerRestore();
     document.getElementById('empty-open')!.addEventListener('click', () => void this.open());
     document
       .getElementById('empty-sample')!
@@ -424,6 +457,8 @@ export class App implements ShortcutTarget {
   /** Called after any change to `doc` (commit, undo, redo). */
   protected afterChange(): void {
     this.dirty = this.history.isDirty;
+    this.statusMessage = '';
+    this.scheduleAutosave();
     if (this.selection.size && this.doc) {
       const ids = new Set(this.doc.strokes.map((s) => s.id));
       const kept = [...this.selection].filter((id) => ids.has(id));
@@ -773,18 +808,33 @@ export class App implements ShortcutTarget {
 
   /** Ask before replacing a document with unsaved changes. */
   confirmDiscard(): boolean {
+    if (this.closeRestoreBanner && !this.doc) {
+      return confirm(
+        'Unsaved work from your last session has not been restored. Open this file and discard that work?',
+      );
+    }
     if (!this.dirty) return true;
     return confirm('You have unsaved changes. Open another file and discard them?');
   }
 
   async openPdfBytes(bytes: Uint8Array, name: string, handle: FsFileHandle | null): Promise<void> {
     const { pdf, pages } = await loadPdf(bytes);
-    this.setDocument(createDocument(pages), bytes, pdf, pages.length ? name : name);
+    if (!pages.length) throw new Error('The PDF has no pages.');
+    this.setDocument(createDocument(pages), bytes, pdf, name);
+    this.pdfName = name;
     this.fileHandle = handle;
   }
 
   /** Replace the open document. */
-  protected setDocument(doc: Doc, bytes: Uint8Array, pdf: PDFDocumentProxy, name: string): void {
+  protected setDocument(
+    doc: Doc,
+    bytes: Uint8Array,
+    pdf: PDFDocumentProxy,
+    name: string,
+    replaceAutosave = true,
+  ): void {
+    this.closeRestoreBanner?.();
+    this.closeRestoreBanner = null;
     this.renderer?.destroy();
     this.pdfBytes = bytes;
     this.doc = doc;
@@ -799,14 +849,183 @@ export class App implements ShortcutTarget {
     this.noteZoomChange();
     this.invalidate();
     this.refreshUi();
+    // The newly opened document takes over the autosave slot (any older unsaved work was
+    // either saved or explicitly discarded by the user before getting here).
+    if (replaceAutosave) void this.autosaveNow();
   }
 
-  protected async openProjectFile(_file: File, _handle: FsFileHandle | null): Promise<void> {
-    toast('Project files are not supported yet.');
+  protected async openProjectFile(file: File, handle: FsFileHandle | null): Promise<void> {
+    const project = parseProject(await file.text());
+    const { pdf, pages } = await loadPdf(project.pdfBytes);
+    if (pages.length !== project.doc.pages.length) {
+      throw new Error('The embedded PDF does not match the saved pages.');
+    }
+    this.setDocument(project.doc, project.pdfBytes, pdf, file.name);
+    this.pdfName = project.pdfName;
+    this.fileHandle = handle;
   }
 
-  async save(_saveAs: boolean): Promise<void> {}
-  async exportPdf(): Promise<void> {}
+  // ---------------------------------------------------------------- saving
+
+  private projectFileName(): string {
+    if (this.fileName && isProjectName(this.fileName)) return this.fileName;
+    return `${baseName(this.pdfName)}.pdfnotes`;
+  }
+
+  /** Ctrl+S (asks for a location the first time) / Ctrl+Shift+S (always asks). */
+  async save(saveAs: boolean): Promise<void> {
+    const doc = this.doc;
+    const bytes = this.pdfBytes;
+    if (!doc || !bytes || this.saving) return;
+    this.saving = true;
+    try {
+      const point = this.history.savePoint;
+      let handle: FsFileHandle | 'download' | null = saveAs ? null : this.fileHandle;
+      if (!handle) {
+        handle = await pickSaveLocation(this.projectFileName(), PROJECT_TYPE);
+        if (!handle) return; // cancelled
+      }
+      const blob = new Blob([serializeProject({ doc, pdfBytes: bytes, pdfName: this.pdfName })], {
+        type: 'application/json',
+      });
+      if (handle === 'download') {
+        downloadBlob(blob, this.projectFileName());
+        this.fileName = this.projectFileName();
+        toast('Saved as a download (this browser can’t save to a chosen file).');
+      } else {
+        await writeToHandle(handle, blob);
+        this.fileHandle = handle;
+        this.fileName = handle.name;
+      }
+      this.history.markSavedAt(point);
+      this.dirty = this.history.isDirty;
+      this.statusMessage = `Saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      this.refreshUi();
+      void this.autosaveNow();
+    } catch (err) {
+      console.error(err);
+      toast(`Could not save: ${(err as Error).message}. Your work is still open — try Save As.`, {
+        error: true,
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async exportPdf(): Promise<void> {
+    const doc = this.doc;
+    const bytes = this.pdfBytes;
+    if (!doc || !bytes) return;
+    const name = `${baseName(this.pdfName)} (annotated).pdf`;
+    try {
+      const handle = await pickSaveLocation(name, PDF_TYPE);
+      if (!handle) return;
+      this.statusMessage = 'Exporting…';
+      this.refreshUi();
+      const result = await exportAnnotatedPdf(bytes, doc);
+      const blob = new Blob([result.bytes as BlobPart], { type: 'application/pdf' });
+      if (handle === 'download') downloadBlob(blob, name);
+      else await writeToHandle(handle, blob);
+      this.statusMessage = 'Exported PDF';
+      this.refreshUi();
+      if (result.skippedStrokes) {
+        toast(
+          `${result.skippedStrokes} stroke(s) lie outside every page (in the gray margin) and are not in the exported PDF.`,
+          { error: true },
+        );
+      } else {
+        toast(`Exported “${handle === 'download' ? name : handle.name}”.`);
+      }
+    } catch (err) {
+      console.error(err);
+      this.statusMessage = '';
+      this.refreshUi();
+      toast(`Could not export the PDF: ${(err as Error).message}`, { error: true });
+    }
+  }
+
+  // ---------------------------------------------------------------- autosave
+
+  private scheduleAutosave(): void {
+    clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = window.setTimeout(() => void this.autosaveNow(), 3000);
+  }
+
+  async autosaveNow(): Promise<void> {
+    clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = 0;
+    const doc = this.doc;
+    const bytes = this.pdfBytes;
+    if (!doc || !bytes) return;
+    try {
+      await writeAutosave({
+        doc,
+        pdfBytes: bytes,
+        fileName: this.fileName ?? this.pdfName,
+        unsaved: this.dirty,
+        time: Date.now(),
+      });
+      if (this.autosaveFailing) toast('Autosave is working again.');
+      this.autosaveFailing = false;
+    } catch (err) {
+      console.error(err);
+      if (!this.autosaveFailing) {
+        toast(
+          `Autosave failed: ${(err as Error).message}. Your work is still open — save it to a file (Ctrl+S).`,
+          { error: true },
+        );
+      }
+      this.autosaveFailing = true;
+    }
+  }
+
+  /** On launch, offer to restore autosaved work that was never saved to a file. */
+  private async offerRestore(): Promise<void> {
+    let rec;
+    try {
+      rec = await readAutosave();
+    } catch (err) {
+      console.warn('Could not read autosave', err);
+      return;
+    }
+    if (!rec || !rec.unsaved || this.doc) return;
+    const when = new Date(rec.time).toLocaleString();
+    const record = rec;
+    this.closeRestoreBanner = banner(`Restore unsaved work on “${record.fileName}” from ${when}?`, [
+      {
+        label: 'Restore',
+        run: () => {
+          this.closeRestoreBanner = null;
+          void this.restore(record);
+        },
+      },
+      {
+        label: 'Discard',
+        run: () => {
+          this.closeRestoreBanner = null;
+          if (confirm('Discard the unsaved work permanently?')) void clearAutosave();
+          else void this.offerRestore();
+        },
+      },
+    ]);
+  }
+
+  private async restore(rec: NonNullable<Awaited<ReturnType<typeof readAutosave>>>): Promise<void> {
+    if (!this.confirmDiscard()) return;
+    try {
+      const { pdf, pages } = await loadPdf(rec.pdfBytes);
+      if (pages.length !== rec.doc.pages.length) throw new Error('page count mismatch');
+      this.setDocument(rec.doc, rec.pdfBytes, pdf, rec.fileName, false);
+      this.pdfName = isProjectName(rec.fileName) ? `${baseName(rec.fileName)}.pdf` : rec.fileName;
+      this.fileHandle = null;
+      this.history.markUnsaved();
+      this.dirty = true;
+      this.refreshUi();
+      toast('Restored. Save it to a file with Ctrl+S.');
+    } catch (err) {
+      toast(`Could not restore the autosave: ${(err as Error).message}`, { error: true });
+    }
+  }
 
   // ---------------------------------------------------------------- tools
 

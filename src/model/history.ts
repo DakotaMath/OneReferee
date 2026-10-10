@@ -45,8 +45,18 @@ export class History {
     return this.undoStack.length ? this.undoStack[this.undoStack.length - 1].serial : 0;
   }
 
+  /** An opaque marker for the current state, for `markSavedAt` after an async save. */
+  get savePoint(): number {
+    return this.currentSerial;
+  }
+
   markSaved(): void {
     this.savedSerial = this.currentSerial;
+  }
+
+  /** Mark the state identified by `point` (from `savePoint`) as saved. */
+  markSavedAt(point: number): void {
+    this.savedSerial = point;
   }
 
   /** Forget the save point (e.g. the document was restored from autosave, never saved to a file). */
