@@ -26,7 +26,7 @@ export interface ShortcutTarget {
   scrollBy(dx: number, dy: number): void;
   scrollPage(dir: 1 | -1): void;
   scrollToEnd(dir: 1 | -1): void;
-  altChanged(): void;
+  altChanged(down: boolean): void;
 }
 
 /** Keys that switch tool only while held, or permanently on a quick tap. */
@@ -60,7 +60,7 @@ export function installShortcuts(app: ShortcutTarget): void {
     // Alt on its own would focus the browser menu on Windows; it is our "no snapping" modifier.
     if (e.key === 'Alt') {
       e.preventDefault();
-      app.altChanged();
+      app.altChanged(true);
       return;
     }
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -130,7 +130,7 @@ export function installShortcuts(app: ShortcutTarget): void {
   window.addEventListener('keyup', (e) => {
     if (e.key === 'Alt') {
       e.preventDefault();
-      app.altChanged();
+      app.altChanged(false);
       return;
     }
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -153,6 +153,7 @@ export function installShortcuts(app: ShortcutTarget): void {
 
   // If the window loses focus mid-hold, release the temporary tool.
   window.addEventListener('blur', () => {
+    app.altChanged(false);
     if (!held) return;
     if (held.key === ' ') app.setSpaceHeld(false);
     else if (held.prev) app.setTool(held.prev, true);

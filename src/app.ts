@@ -29,6 +29,10 @@ import { History } from './model/history';
 import type { Command } from './model/commands';
 import { drawStrokes, type DeviceTransform } from './render/ink';
 import { DrawGesture } from './tools/draw';
+import { SpaceGesture, drawCutGuide } from './tools/space';
+import { docYToSource } from './model/document';
+import { findBlankBands, snapToBlank, type Band } from './model/snap';
+import { PREVIEW_SCALE } from './render/pdfRenderer';
 import { origin } from './render/viewport';
 import {
   ERASER_SIZES,
@@ -275,8 +279,42 @@ export class App implements ShortcutTarget {
     this.drawCursor(ctx, t);
   }
 
-  /** Selection boxes, insert-space guide, etc. (later phases). */
-  protected drawOverlayExtras(_ctx: CanvasRenderingContext2D, _t: DeviceTransform): void {}
+  /** Selection boxes, insert-space guide, etc. */
+  protected drawOverlayExtras(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
+    const doc = this.doc!;
+    if (!this.gesture && this.effectiveTool() === 'space' && this.pointer.inside) {
+      const p = this.toDoc(this.pointer.sx, this.pointer.sy);
+      drawCutGuide(ctx, doc, this.snapCut(p.y, this.altDown), t);
+    }
+  }
+
+  /** Alt is held (insert space without snapping). */
+  altDown = false;
+
+  isAltDown(): boolean {
+    return this.altDown;
+  }
+
+  private bandCache = new WeakMap<Uint8Array, Band[]>();
+
+  /** Snap a cut at document y to the nearest blank band of the PDF (within ~12 pt). */
+  snapCut(y: number, noSnap: boolean): number {
+    const doc = this.displayDoc;
+    if (!doc || noSnap || !this.renderer) return y;
+    const src = docYToSource(doc, y);
+    if (!src) return y; // already in blank space
+    const rows = this.renderer.blankRowProfile(src.page);
+    if (!rows) return y;
+    let bands = this.bandCache.get(rows);
+    if (!bands) {
+      bands = findBlankBands(rows, PREVIEW_SCALE);
+      this.bandCache.set(rows, bands);
+    }
+    const seg = doc.segments[src.index];
+    if (seg.kind !== 'slice') return y;
+    const snapped = Math.min(Math.max(snapToBlank(src.srcY, bands), seg.srcTop), seg.srcBottom);
+    return y + (snapped - src.srcY);
+  }
 
   /** Tool cursor drawn at the pen tip (pen dot / eraser circle). */
   protected drawCursor(ctx: CanvasRenderingContext2D, t: DeviceTransform): void {
@@ -338,6 +376,7 @@ export class App implements ShortcutTarget {
   /** Called after any change to `doc` (commit, undo, redo). */
   protected afterChange(): void {
     this.dirty = this.history.isDirty;
+    this.view = clampView(this.view, this.ext());
     this.invalidate(true, true, true);
     this.refreshUi();
   }
@@ -546,6 +585,7 @@ export class App implements ShortcutTarget {
       const color = tool === 'pen' ? this.settings.penColor : this.settings.highlighterColor;
       return new DrawGesture(this, tool, color, this.currentWidth(tool), s, e.pointerType);
     }
+    if (tool === 'space') return new SpaceGesture(this, s);
     return null;
   }
 
@@ -712,7 +752,8 @@ export class App implements ShortcutTarget {
   deleteSelection(): void {}
   escape(): void {}
 
-  altChanged(): void {
+  altChanged(down?: boolean): void {
+    if (down !== undefined) this.altDown = down;
     this.invalidate(false, false, true);
   }
 
