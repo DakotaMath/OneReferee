@@ -45,8 +45,12 @@ function serviceWorkerPlugin(): Plugin {
   };
 }
 
+// Shown in the status bar: the commit being deployed (GitHub Actions), else "dev".
+const appVersion = (process.env.GITHUB_SHA ?? 'dev').slice(0, 7);
+
 export default defineConfig({
   base: './',
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   plugins: [serviceWorkerPlugin()],
   build: {
     target: 'es2022',

@@ -59,6 +59,7 @@ import {
   HIGHLIGHTER_WIDTHS,
   PEN_COLORS,
   PEN_WIDTHS,
+  TOOL_LABELS,
 } from './tools/toolTypes';
 
 const ZOOM_SETTLE_MS = 180;
@@ -1095,6 +1096,8 @@ export class App implements ShortcutTarget {
     // release to get the pen back with the selection still there to drag).
     if (!temporary && t !== this.tool && this.selection.size) this.setSelection([]);
     this.tool = t;
+    // Name the tool in the status bar, so key presses from the pen buttons are easy to confirm.
+    this.statusMessage = TOOL_LABELS[t];
     this.refreshUi();
     this.invalidate(false, false, true);
   }
@@ -1102,7 +1105,8 @@ export class App implements ShortcutTarget {
   setSpaceHeld(held: boolean): void {
     if (this.spaceHeld === held) return;
     this.spaceHeld = held;
-    this.updateCursor();
+    this.statusMessage = held ? 'Hand (while Space is held)' : TOOL_LABELS[this.tool];
+    this.refreshUi();
     this.invalidate(false, false, true);
   }
 

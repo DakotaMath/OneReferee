@@ -23,7 +23,11 @@ export class StatusBar {
     this.msg.className = 'saved-state';
     const grow = document.createElement('span');
     grow.className = 'grow';
-    root.append(this.file, this.dirty, this.msg, grow, this.page, this.zoom);
+    const version = document.createElement('span');
+    version.className = 'version';
+    version.textContent = `v${__APP_VERSION__}`;
+    version.title = 'App version (changes with every update)';
+    root.append(this.file, this.dirty, this.msg, grow, this.page, this.zoom, version);
   }
 
   update(s: StatusState): void {

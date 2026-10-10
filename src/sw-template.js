@@ -8,8 +8,14 @@ self.addEventListener('install', (event) => {
     caches
       .open(CACHE)
       .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting()),
+      // First install: take over right away. An update instead waits until the page says it's a
+      // safe moment (see main.ts), so an open page never loses the files it was loaded with.
+      .then(() => (self.registration.active ? undefined : self.skipWaiting())),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'skipWaiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -35,7 +41,12 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const isPage = req.mode === 'navigate';
-      const cached = await cache.match(isPage ? './' : req, { ignoreSearch: isPage });
+      // ignoreVary: module scripts send an Origin header the precache request didn't, which would
+      // otherwise make a "Vary" response miss the cache.
+      const cached = await cache.match(isPage ? './' : req, {
+        ignoreSearch: isPage,
+        ignoreVary: true,
+      });
       if (cached) return cached;
       try {
         const res = await fetch(req);
@@ -43,7 +54,7 @@ self.addEventListener('fetch', (event) => {
         return res;
       } catch (err) {
         if (isPage) {
-          const shell = await cache.match('./');
+          const shell = await cache.match('./', { ignoreVary: true });
           if (shell) return shell;
         }
         throw err;
