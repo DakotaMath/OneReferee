@@ -79,3 +79,9 @@ Judgment calls made where `SPEC.md` was ambiguous or silent, recorded as the bui
 - **Opening files with the installed app.** The PWA manifest registers `.pdf` and `.pdfnotes` file handlers, and the app accepts files from Windows "Open with" through the Launch Queue API when installed.
 - **Memory.** Low-res previews are kept for the 20 most recently used pages (about 4 MB each for US Letter), sharp tiles within ~40 megapixels.
 - **Performance check** (headless Chromium, 60-page sample with 4,000 strokes): the insert-space model update takes ~2.5 ms per drag frame and redrawing the visible ink ~0.1 ms, thanks to bounding-box culling and outline caching. On real hardware the canvas compositing is GPU-accelerated.
+
+## Hand-off notes
+
+- **Deploying.** All work is on the branch `claude/magical-galileo-dbwvpo`; the workflow builds, lints, tests and uploads the Pages artifact there. The site is published when the branch is merged to `main`, provided **Settings → Pages → Source** is set to **GitHub Actions**. The live URL will be `https://dakotamath.github.io/OneReferee/`.
+- **Not verifiable from the cloud** (covered in TESTING.md): real pen latency and pressure feel, Windows Ink behavior of the side buttons, Huion key/dial mappings, multi-monitor scaling changes, File System Access save dialogs, and how the exported PDF looks in Edge's own viewer. Everything else was exercised in headless Chromium with synthetic pen events as well as by the unit tests.
+- **Known limitations.** Links, form fields and annotations of the original PDF are not carried into the exported PDF. Ink written entirely outside any page can't be exported (you are told how many strokes). The point eraser cuts at the circle edge; pressure tapering at the new ends follows the interpolated pressure, so cut ends are blunt rather than tapered.
